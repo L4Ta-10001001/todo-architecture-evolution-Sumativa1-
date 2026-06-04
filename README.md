@@ -72,6 +72,8 @@ al instante.
 
 ## Cómo ejecutar
 ```bash
+mvn clean
+mvn -DskipTests package
 mvn spring-boot:run
 ```
 La aplicación levanta en `http://localhost:8080` y crea `todo.db` en la
