@@ -1,107 +1,136 @@
-# Branch `spaghetti` — Anti-patrones a propósito
+# Branch `layered-monolith` — Arquitectura por capas
 
 ## Propósito
-Esta rama contiene la **peor versión posible** de la aplicación de tareas
-(intencionalmente). Sirve como ejemplo pedagógico de lo que **NO** se debe
-hacer al estructurar un proyecto Java/Spring. Toda la lógica vive en una
-única clase `Main.java` que mezcla bootstrap, routing, validación, SQL y
-negocio.
+Esta rama refactoriza la aplicación de tareas aplicando una
+**arquitectura en capas** estricta. Cada capa tiene una única
+responsabilidad, y las dependencias entre ellas son **unidireccionales**
+(de arriba hacia abajo):
 
-> "Spaghetti code" = código enredado donde el flujo de control, los datos y
-> las responsabilidades están tan entrelazados que seguir la pista de una
-> sola operación requiere saltar entre métodos, sin ningún tipo de
-> separación de capas.
-
-## Diagrama de "arquitectura"
 ```
-+-----------------------------------------------------------+
-|                      Main.java (God class)                |
-|                                                           |
-|  +-----------+   +-------------+   +-------------------+  |
-|  | @RestCtrl |   |  validate() |   |  DriverManager    |  |
-|  |  routes   |   |  rowToMap() |   |  + raw SQL DDL    |  |
-|  |           |   |  getConn()  |   |  + raw SQL DML    |  |
-|  +-----------+   +-------------+   +-------------------+  |
-|         \             |              /                    |
-|          \            |             /                     |
-|           +-----------v------------+                      |
-|           |    HTTP + SQL + Lógica  |                     |
-|           |    todo mezclado        |                     |
-|           +-----------+------------+                      |
-|                       |                                   |
-|                       v                                   |
-|                 todo.db (SQLite)                          |
-+-----------------------------------------------------------+
+Controller  →  Service  →  Repository  →  DB (SQLite)
 ```
 
-## Anti-patrones presentes (y dónde)
+> El objetivo es mostrar cómo separar concerns mejora la mantenibilidad,
+> la testabilidad y la legibilidad, **sin** salir de un monolito.
 
-| # | Anti-patrón                                      | Dónde se ve                                                    |
-|---|--------------------------------------------------|----------------------------------------------------------------|
-| 1 | **God class**                                    | Toda la app es `Main.java` (Spring + REST + SQL + validación). |
-| 2 | **Lógica de negocio en el controlador**          | `validate()`, `rowToMap()` están dentro de `@RestController`.  |
-| 3 | **SQL hardcodeado en el controlador**            | `INSERT`, `UPDATE`, `DELETE`, `SELECT` dentro de `@PostMapping` etc. |
-| 4 | **Cadena de conexión hardcodeada y duplicada**   | `private static final String DB = "jdbc:sqlite:todo.db";` y además en `application.properties`. |
-| 5 | **Sin DTOs**                                     | Los endpoints reciben y devuelven `Map<String,Object>`.        |
-| 6 | **Sin entidad de dominio**                       | No existe `Task`; las filas se convierten ad-hoc en cada método. |
-| 7 | **Nombres genéricos**                            | `data`, `obj`, `temp`, `x`, `m`, `n`.                          |
-| 8 | **Sin abstracciones / interfaces**               | Imposible mockear, imposible cambiar la persistencia.         |
-| 9 | **Catch genérico que se traga la traza**         | `catch (Exception e) { return Map.of("error", e.getMessage()); }` |
-| 10| **DDL embebido en `main`**                        | `CREATE TABLE IF NOT EXISTS tasks (...)` dentro de `public static void main`. |
-| 11| **Mezcla verbos HTTP conmutados**                 | `PUT` reescribe, `PATCH /complete` reescribe, `DELETE` borra — todo en el mismo archivo. |
+## Diagrama de arquitectura
 
-Cada uno de estos puntos está **etiquetado en el código** con un
-comentario `// ANTI-PATTERN: ...` para que el lector los pueda localizar
-al instante.
+```
+   HTTP request
+        |
+        v
++------------------------------------------------------------+
+| controller/TaskController                                  |
+|  - @RestController                                          |
+|  - Solo concerns HTTP: status codes, DTOs, validacion       |
++----------------------------+-------------------------------+
+                             |  usa DTOs (TaskRequest/Response)
+                             v
++------------------------------------------------------------+
+| service/TaskService                                        |
+|  - @Service                                                 |
+|  - Logica de negocio: findAllTasks, markAsCompleted, ...   |
+|  - Transacciones (@Transactional)                           |
++----------------------------+-------------------------------+
+                             |  usa entidades (Task)
+                             v
++------------------------------------------------------------+
+| repository/TaskRepository (Spring Data JPA)                |
+|  - @Repository                                              |
+|  - findAll, findById, save, deleteById                      |
++----------------------------+-------------------------------+
+                             |
+                             v
+                       todo.db (SQLite)
+```
 
-## Por qué es problemático para el mantenimiento
-- **Testabilidad nula**: no se puede aislar la lógica de negocio
-  porque está cosida al transporte HTTP y a JDBC.
-- **Inversión de dependencias rota**: el controlador "conoce" la base
-  de datos, el SQL, los nombres de columnas, y la forma de los Mapas.
-  Cambiar SQLite por Postgres, o REST por gRPC, implica reescribir
-  todo.
-- **Alto acoplamiento, baja cohesión**: cada `@Mapping` hace de todo,
-  por lo que añadir una columna nueva obliga a tocar todos los métodos.
-- **Lectura hostil**: los nombres `x`, `data`, `obj` obligan al lector
-  a reconstruir mentalmente el dominio en cada línea.
-- **Cero Ubiquitous Language**: no hay verbos de dominio
-  (`markAsCompleted`, `renameTask`); solo operaciones CRUD genéricas.
-- **Refactorización arriesgada**: al estar todo en un archivo, el
-  riesgo de regresiones al mover código es altísimo.
+## Responsabilidad de cada capa
+
+| Capa           | Paquete          | Responsabilidad                                                       | No debe…                                                |
+|----------------|------------------|------------------------------------------------------------------------|----------------------------------------------------------|
+| **Controller** | `controller/`    | Deserializar HTTP, validar formato, elegir status code, serializar.   | Conocer JPA, JDBC, SQL, lógica de negocio.               |
+| **Service**    | `service/`       | Reglas de negocio (`markAsCompleted`, `findTaskById`, transacciones).| Manejar `HttpServletRequest`, devolver DTOs al cliente.  |
+| **Repository** | `repository/`    | Acceso a datos (CRUD JPA).                                             | Tener lógica de negocio, lanzar 404.                     |
+| **Model**      | `model/`         | Entidad JPA `Task` (id, title, description, completed).                | Tener dependencias de Spring Web.                       |
+| **DTO**        | `dto/`           | `TaskRequest` (entrada) y `TaskResponse` (salida).                     | Ser la entidad persistida.                              |
+| **Exception**  | `exception/`     | `TaskNotFoundException`, `GlobalExceptionHandler` (mapea a HTTP).      | Acoplar lógica de negocio.                              |
+
+## Regla de dependencia unidireccional
+- `controller/` **solo importa** de `service/`, `dto/`, `exception/`.
+- `service/` **solo importa** de `repository/`, `model/`, `exception/`, `dto/`.
+- `repository/` **solo importa** de `model/`.
+- `model/` no importa nada del proyecto.
+- **Nunca** un paquete inferior importa de uno superior.
+
+> En la rama `spaghetti` esta regla se rompía constantemente: el
+> "controlador" conocía SQL, DDL, validación, Mapas y DTOs al mismo
+> tiempo. Aquí, el controlador no sabe ni siquiera qué base de datos
+> hay debajo.
+
+## Lenguaje ubicuo (Ubiquitous Language)
+Los nombres siguen el vocabulario del dominio:
+- `findAllTasks`, `findTaskById`
+- `createTask`, `updateTask`
+- `markAsCompleted`
+- `deleteTask`
+
+Compara con la rama `spaghetti`, donde los métodos se llamaban
+literalmente `get`, `update`, `complete`, `delete` mezclados en una
+clase llamada `Main`.
 
 ## Cómo ejecutar
 ```bash
 mvn spring-boot:run
 ```
-La aplicación levanta en `http://localhost:8080` y crea `todo.db` en la
-raíz del proyecto.
+Levanta en `http://localhost:8080` y crea `todo.db` automáticamente.
 
 ## Endpoints
 
-| Método | Ruta                       | Descripción                              | Códigos |
-|--------|----------------------------|------------------------------------------|---------|
-| GET    | `/api/tasks`               | Listar todas las tareas.                 | 200     |
-| POST   | `/api/tasks`               | Crear tarea (`{title, description?}`).   | 200/400 |
-| GET    | `/api/tasks/{id}`          | Obtener tarea por id.                    | 200/404 |
-| PUT    | `/api/tasks/{id}`          | Reemplazar título/descripción/completed. | 200/404 |
-| PATCH  | `/api/tasks/{id}/complete` | Marcar como completada.                  | 200/404 |
-| DELETE | `/api/tasks/{id}`          | Eliminar tarea.                          | 200/404 |
+| Método | Ruta                       | Descripción                              | Códigos                |
+|--------|----------------------------|------------------------------------------|------------------------|
+| GET    | `/api/tasks`               | Listar todas las tareas.                 | 200                    |
+| POST   | `/api/tasks`               | Crear tarea (`{title, description?}`).   | 201 / 400              |
+| GET    | `/api/tasks/{id}`          | Obtener tarea por id.                    | 200 / 404              |
+| PUT    | `/api/tasks/{id}`          | Reemplazar título/descripción/completed. | 200 / 404 / 400        |
+| PATCH  | `/api/tasks/{id}/complete` | Marcar como completada.                  | 200 / 404              |
+| DELETE | `/api/tasks/{id}`          | Eliminar tarea.                          | 200 / 404              |
 
 ### Ejemplos rápidos
 ```bash
 curl -X POST http://localhost:8080/api/tasks \
      -H 'Content-Type: application/json' \
-     -d '{"title":"Comprar pan","description":"En la tienda de la esquina"}'
+     -d '{"title":"Comprar pan","description":"en la tienda"}'
 
 curl http://localhost:8080/api/tasks
-curl http://localhost:8080/api/tasks/1
 curl -X PATCH http://localhost:8080/api/tasks/1/complete
 curl -X DELETE http://localhost:8080/api/tasks/1
 ```
 
+## Contraste con la rama `spaghetti`
+
+| Aspecto                          | spaghetti                          | layered-monolith                          |
+|----------------------------------|------------------------------------|-------------------------------------------|
+| Número de clases                 | 1                                  | 8                                         |
+| SQL en el controlador            | Sí                                 | No                                        |
+| DTOs                             | No (usa `Map<String,Object>`)      | Sí (`TaskRequest`/`TaskResponse`)         |
+| Validación                       | Manual, en línea                   | `@Valid` + `Bean Validation`              |
+| Manejo de errores                | `catch (Exception)` que traga todo | `@RestControllerAdvice` mapea a 404/400   |
+| Códigos HTTP                     | Mezclados con SQL                  | Decididos solo en el controlador          |
+| Nombres de métodos               | `get`, `update`, `x`               | `markAsCompleted`, `findAllTasks`         |
+| Probable de testear en aislamiento | No                                 | Sí (mockeando `TaskService`)              |
+
 ## Archivos de esta rama
-- `pom.xml` — dependencias (web + JDBC + sqlite-jdbc).
-- `src/main/resources/application.properties` — puerto y datasource.
-- `src/main/java/com/todo/Main.java` — **toda** la aplicación.
-- `README.md` — este documento.
+```
+pom.xml
+src/main/resources/application.properties
+src/main/java/com/todo/TodoApplication.java
+src/main/java/com/todo/controller/TaskController.java
+src/main/java/com/todo/service/TaskService.java
+src/main/java/com/todo/repository/TaskRepository.java
+src/main/java/com/todo/model/Task.java
+src/main/java/com/todo/dto/TaskRequest.java
+src/main/java/com/todo/dto/TaskResponse.java
+src/main/java/com/todo/exception/TaskNotFoundException.java
+src/main/java/com/todo/exception/GlobalExceptionHandler.java
+README.md
+```
