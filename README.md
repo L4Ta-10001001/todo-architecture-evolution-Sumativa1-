@@ -80,6 +80,8 @@ clase llamada `Main`.
 
 ## Cómo ejecutar
 ```bash
+mvn clean
+mvn -DskipTests package
 mvn spring-boot:run
 ```
 Levanta en `http://localhost:8080` y crea `todo.db` automáticamente.
