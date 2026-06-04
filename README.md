@@ -144,6 +144,8 @@ domain/service/TaskDomainService.java -> domain.model.*, domain.port.*
 
 ## Cómo ejecutar
 ```bash
+mvn clean
+mvn -DskipTests package
 mvn spring-boot:run
 ```
 Levanta en `http://localhost:8080` y crea `todo.db` en la raíz
