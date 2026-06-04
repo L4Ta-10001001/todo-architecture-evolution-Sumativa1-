@@ -21,6 +21,8 @@ arquitectura impactan la mantenibilidad del código.
 ```bash
 git checkout <nombre-rama>     # spaghetti | layered-monolith | ddd-hexagonal
 rm -f todo.db                  # opcional: empieza con DB limpia
+mvn clean
+mvn -DskipTests package        # limpieza de Tests: pero en este caso no hay tests
 mvn spring-boot:run            # arranca en http://localhost:8080
 ```
 
