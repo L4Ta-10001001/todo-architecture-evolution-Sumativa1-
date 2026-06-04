@@ -1,27 +1,35 @@
-package com.todo.dto;
+package com.todo.infrastructure.web;
 
-import com.todo.model.Task;
+import com.todo.domain.model.Task;
 
-public class TaskResponse {
+/**
+ * Tiny DTO used by the web adapter to translate between
+ * {@link Task} (domain) and JSON (transport).
+ *
+ * <p>Kept inside the infrastructure layer so the domain never
+ * imports Jackson or Spring.
+ */
+public class TaskDto {
 
     private final Long id;
     private final String title;
     private final String description;
     private final boolean completed;
 
-    public TaskResponse(Long id, String title, String description, boolean completed) {
+    public TaskDto(Long id, String title, String description, boolean completed) {
         this.id = id;
         this.title = title;
         this.description = description;
         this.completed = completed;
     }
 
-    public static TaskResponse fromEntity(Task task) {
-        return new TaskResponse(
+    public static TaskDto fromDomain(Task task) {
+        return new TaskDto(
                 task.getId(),
                 task.getTitle(),
                 task.getDescription(),
-                task.isCompleted());
+                task.isCompleted()
+        );
     }
 
     public Long getId() { return id; }

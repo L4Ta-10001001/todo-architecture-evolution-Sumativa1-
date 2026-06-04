@@ -1,5 +1,6 @@
-package com.todo.exception;
+package com.todo.infrastructure.web;
 
+import com.todo.domain.model.TaskNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -10,8 +11,14 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Maps domain exceptions (and validation errors) to HTTP responses.
+ *
+ * <p>This is part of the infrastructure/web adapter; the domain
+ * does not know HTTP exists.
+ */
 @RestControllerAdvice
-public class GlobalExceptionHandler {
+public class WebExceptionHandler {
 
     @ExceptionHandler(TaskNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(TaskNotFoundException ex) {
@@ -25,6 +32,11 @@ public class GlobalExceptionHandler {
                 .map(e -> e.getField() + ": " + e.getDefaultMessage())
                 .orElse("invalid request");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body(400, msg));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArg(IllegalArgumentException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body(400, ex.getMessage()));
     }
 
     private Map<String, Object> body(int status, String message) {
